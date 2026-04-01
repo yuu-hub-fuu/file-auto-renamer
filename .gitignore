@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+
+build/
+dist/_MEI*/
+*.spec
+
+_tmp_test_*/
+
+Thumbs.db
+Desktop.ini

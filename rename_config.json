@@ -1,0 +1,16 @@
+{
+  "ask_for_input": true,
+  "single_item_template": "{input}",
+  "multi_item_template": "{input}_{index}",
+  "conflict_strategy": "auto_increment",
+  "index_start": 1,
+  "index_width": 2,
+  "date_format": "%Y%m%d",
+  "time_format": "%H%M%S",
+  "conflict_separator": "_",
+  "prompt_title": "拖拽改名器",
+  "prompt_message": "请输入新的名称",
+  "success_title": "改名完成",
+  "info_title": "拖拽改名器",
+  "confirm_title": "批量确认"
+}
