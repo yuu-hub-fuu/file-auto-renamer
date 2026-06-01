@@ -6,7 +6,7 @@ import sys
 import traceback
 import tkinter as tk
 from pathlib import Path
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from rename_core import (
     DEFAULT_CONFIG,
@@ -152,11 +152,15 @@ class ControlPanel:
         self.index_start_var = tk.StringVar(value=str(self.config["index_start"]))
         self.index_width_var = tk.StringVar(value=str(self.config["index_width"]))
         self.separator_var = tk.StringVar(value=self.config["conflict_separator"])
+        self.conflict_strategy_var = tk.StringVar(value=self.config["conflict_strategy"])
+        self.date_format_var = tk.StringVar(value=self.config["date_format"])
+        self.time_format_var = tk.StringVar(value=self.config["time_format"])
         self.prompt_message_var = tk.StringVar(value=self.config["prompt_message"])
         self.mode_hint_var = tk.StringVar()
         self.simple_label_var = tk.StringVar()
         self.preview_single_var = tk.StringVar()
         self.preview_multi_var = tk.StringVar()
+        self.status_var = tk.StringVar(value="可直接保存配置，或在本面板内选择文件立即改名。")
 
         self.build_ui()
         self.bind_updates()
@@ -336,9 +340,29 @@ class ControlPanel:
             row=3, column=1, sticky="w", pady=4
         )
 
-        ttk.Label(self.custom_box, text="重名时中间加什么").grid(row=4, column=0, sticky="w", pady=4)
+        ttk.Label(self.custom_box, text="重名处理策略").grid(row=4, column=0, sticky="w", pady=4)
+        strategy_combo = ttk.Combobox(
+            self.custom_box,
+            textvariable=self.conflict_strategy_var,
+            state="readonly",
+            values=("auto_increment", "error"),
+            width=14,
+        )
+        strategy_combo.grid(row=4, column=1, sticky="w", pady=4)
+
+        ttk.Label(self.custom_box, text="重名时中间加什么").grid(row=5, column=0, sticky="w", pady=4)
         ttk.Entry(self.custom_box, textvariable=self.separator_var, width=10).grid(
-            row=4, column=1, sticky="w", pady=4
+            row=5, column=1, sticky="w", pady=4
+        )
+
+        ttk.Label(self.custom_box, text="日期格式").grid(row=6, column=0, sticky="w", pady=4)
+        ttk.Entry(self.custom_box, textvariable=self.date_format_var, width=20).grid(
+            row=6, column=1, sticky="w", pady=4
+        )
+
+        ttk.Label(self.custom_box, text="时间格式").grid(row=7, column=0, sticky="w", pady=4)
+        ttk.Entry(self.custom_box, textvariable=self.time_format_var, width=20).grid(
+            row=7, column=1, sticky="w", pady=4
         )
 
         ttk.Label(
@@ -349,7 +373,7 @@ class ControlPanel:
             ),
             foreground="#555555",
             wraplength=720,
-        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        ).grid(row=8, column=0, columnspan=2, sticky="w", pady=(10, 0))
         self.custom_box.columnconfigure(1, weight=1)
 
         footer = ttk.Frame(self.main)
@@ -363,6 +387,25 @@ class ControlPanel:
         ttk.Button(footer, text="恢复默认", command=self.reset_defaults).pack(side="right", padx=(8, 0))
         ttk.Button(footer, text="保存配置", command=self.save).pack(side="right")
 
+        action_box = ttk.LabelFrame(self.main, text="5. 直接执行改名", padding=14)
+        action_box.pack(fill="x", pady=(8, 0))
+        ttk.Label(
+            action_box,
+            text="不想拖拽时，可直接在这里选择目标立即执行。",
+            foreground="#555555",
+        ).pack(anchor="w")
+        buttons = ttk.Frame(action_box)
+        buttons.pack(fill="x", pady=(10, 0))
+        ttk.Button(buttons, text="选择文件并改名", command=self.rename_selected_files).pack(
+            side="left"
+        )
+        ttk.Button(buttons, text="选择文件夹并改名", command=self.rename_selected_folder).pack(
+            side="left", padx=(8, 0)
+        )
+        ttk.Label(action_box, textvariable=self.status_var, foreground="#0b5f2a", wraplength=720).pack(
+            anchor="w", pady=(10, 0)
+        )
+
     def bind_updates(self) -> None:
         for variable in (
             self.mode_var,
@@ -372,6 +415,10 @@ class ControlPanel:
             self.multi_template_var,
             self.index_start_var,
             self.index_width_var,
+            self.separator_var,
+            self.conflict_strategy_var,
+            self.date_format_var,
+            self.time_format_var,
             self.prompt_message_var,
         ):
             variable.trace_add("write", self.on_value_changed)
@@ -479,34 +526,101 @@ class ControlPanel:
         self.index_start_var.set(str(DEFAULT_CONFIG["index_start"]))
         self.index_width_var.set(str(DEFAULT_CONFIG["index_width"]))
         self.separator_var.set(DEFAULT_CONFIG["conflict_separator"])
+        self.conflict_strategy_var.set(DEFAULT_CONFIG["conflict_strategy"])
+        self.date_format_var.set(DEFAULT_CONFIG["date_format"])
+        self.time_format_var.set(DEFAULT_CONFIG["time_format"])
         self.prompt_message_var.set(DEFAULT_CONFIG["prompt_message"])
         self.refresh_ui()
 
+    def build_config_from_ui(self) -> dict:
+        index_start = int(self.index_start_var.get().strip())
+        index_width = int(self.index_width_var.get().strip())
+        if index_width < 1:
+            raise ValueError("序号宽度至少为 1。")
+
+        single_template, multi_template = self.build_templates()
+        config = load_config(self.config_path)
+        config.update(
+            {
+                "ask_for_input": self.ask_for_input_var.get(),
+                "single_item_template": single_template or "{input}",
+                "multi_item_template": multi_template or "{input}_{index}",
+                "index_start": index_start,
+                "index_width": index_width,
+                "conflict_strategy": self.conflict_strategy_var.get().strip() or "auto_increment",
+                "conflict_separator": self.separator_var.get(),
+                "date_format": self.date_format_var.get().strip() or DEFAULT_CONFIG["date_format"],
+                "time_format": self.time_format_var.get().strip() or DEFAULT_CONFIG["time_format"],
+                "prompt_message": self.prompt_message_var.get().strip() or "请输入新的名称",
+            }
+        )
+        return config
+
+    def ask_input_if_needed(self, config: dict) -> str:
+        if not bool(config.get("ask_for_input", True)):
+            return ""
+
+        text = simpledialog.askstring(
+            title=str(config.get("prompt_title", DEFAULT_CONFIG["prompt_title"])),
+            prompt=str(config.get("prompt_message", DEFAULT_CONFIG["prompt_message"])),
+            parent=self.root,
+        )
+        if text is None:
+            raise KeyboardInterrupt("用户取消了输入。")
+        return text.strip()
+
+    def run_rename_with_selected_paths(self, raw_paths: list[str], source_label: str) -> None:
+        if not raw_paths:
+            self.status_var.set(f"未选择{source_label}，已取消。")
+            return
+
+        try:
+            config = self.build_config_from_ui()
+            paths = collect_paths(raw_paths)
+            user_input = self.ask_input_if_needed(config)
+            plans = build_plan(paths, config, user_input)
+            if len(plans) > 1:
+                approved = messagebox.askokcancel(
+                    title=str(config.get("confirm_title", DEFAULT_CONFIG["confirm_title"])),
+                    message=batch_confirm_text(plans),
+                    parent=self.root,
+                )
+                if not approved:
+                    self.status_var.set("已取消批量改名。")
+                    return
+            completed, skipped = execute_plan(plans)
+            summary = summary_text(completed, skipped)
+            messagebox.showinfo(
+                str(config.get("success_title", DEFAULT_CONFIG["success_title"])),
+                summary,
+                parent=self.root,
+            )
+            self.status_var.set(
+                f"{source_label}改名完成：共处理 {len(completed)} 项，跳过 {len(skipped)} 项。"
+            )
+        except KeyboardInterrupt as exc:
+            self.status_var.set(str(exc) or "已取消操作。")
+        except Exception as exc:
+            messagebox.showerror("执行失败", str(exc), parent=self.root)
+            self.status_var.set(f"{source_label}改名失败：{exc}")
+
+    def rename_selected_files(self) -> None:
+        selected = filedialog.askopenfilenames(title="选择要改名的文件", parent=self.root)
+        self.run_rename_with_selected_paths(list(selected), "文件")
+
+    def rename_selected_folder(self) -> None:
+        selected = filedialog.askdirectory(title="选择要改名的文件夹", parent=self.root, mustexist=True)
+        self.run_rename_with_selected_paths([selected] if selected else [], "文件夹")
+
     def save(self) -> None:
         try:
-            index_start = int(self.index_start_var.get().strip())
-            index_width = int(self.index_width_var.get().strip())
-            if index_width < 1:
-                raise ValueError("序号宽度至少为 1。")
-
-            config = load_config(self.config_path)
-            single_template, multi_template = self.build_templates()
-            config.update(
-                {
-                    "ask_for_input": self.ask_for_input_var.get(),
-                    "single_item_template": single_template or "{input}",
-                    "multi_item_template": multi_template or "{input}_{index}",
-                    "index_start": index_start,
-                    "index_width": index_width,
-                    "conflict_separator": self.separator_var.get(),
-                    "prompt_message": self.prompt_message_var.get().strip() or "请输入新的名称",
-                }
-            )
+            config = self.build_config_from_ui()
             save_config(self.config_path, config)
         except ValueError as exc:
             messagebox.showerror("保存失败", str(exc), parent=self.root)
             return
 
+        self.status_var.set(f"配置已保存：{self.config_path}")
         messagebox.showinfo("保存成功", f"配置已保存到:\n{self.config_path}", parent=self.root)
 
     def run(self) -> None:
